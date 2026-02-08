@@ -6,27 +6,27 @@ import styles from './scanner.module.css';
 
 export default function QRScannerComponent() {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [scanner, setScanner] = useState<QrScanner | null>(null);
+    const scannerRef = useRef<QrScanner | null>(null); // Utilisation d'une Ref pour le scanner
     const [scannedData, setScannedData] = useState<string>('');
-    const [isScanning, setIsScanning] = useState(true);
+    const [isScanning, setIsScanning] = useState(false);
     const [error, setError] = useState<string>('');
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        if (!videoRef.current) return;
+        const videoElement = videoRef.current;
+        if (!videoElement) return;
 
-        const qrScanner = new QrScanner(
-            videoRef.current,
+        // Initialisation du scanner
+        scannerRef.current = new QrScanner(
+            videoElement,
             (result) => {
                 setScannedData(result.data);
-                // Optionnel: arrêter le scanner après une lecture réussie
-                // qrScanner.stop();
             },
             {
                 onDecodeError: (error) => {
-                    // Ignorer les erreurs de décodage normales
-                    if (error !== QrScanner.NO_QR_CODE_FOUND) {
-                        console.error('QR Scanner error:', error);
+                    // On ignore les erreurs de recherche de code (fréquentes pendant le scan)
+                    if (typeof error === 'string' && error.includes('No QR code found')) {
+                        return;
                     }
                 },
                 highlightCodeOutline: true,
@@ -34,38 +34,45 @@ export default function QRScannerComponent() {
             }
         );
 
-        setScanner(qrScanner);
-        setIsLoading(true);
-
-        qrScanner.start()
-            .then(() => {
-                setIsLoading(false);
+        const startScanner = async () => {
+            try {
+                setIsLoading(true);
+                await scannerRef.current?.start();
+                setIsScanning(true);
                 setError('');
-            })
-            .catch((err) => {
-                setError(`Erreur lors du démarrage du scanner: ${err.message}`);
+            } catch (err: any) {
+                setError("Caméra introuvable ou accès refusé.");
+                console.error(err);
+            } finally {
                 setIsLoading(false);
-            });
+            }
+        };
 
+        startScanner();
+
+        // Nettoyage crucial pour Next.js (Strict Mode)
         return () => {
-            qrScanner.stop();
-            qrScanner.destroy();
+            if (scannerRef.current) {
+                scannerRef.current.stop();
+                scannerRef.current.destroy();
+                scannerRef.current = null;
+            }
         };
     }, []);
 
     const handleToggleScan = async () => {
-        if (!scanner) return;
+        if (!scannerRef.current) return;
 
         try {
             if (isScanning) {
-                await scanner.stop();
+                scannerRef.current.stop();
                 setIsScanning(false);
             } else {
-                await scanner.start();
+                await scannerRef.current.start();
                 setIsScanning(true);
             }
         } catch (err) {
-            setError(`Erreur: ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+            setError("Impossible de basculer la caméra.");
         }
     };
 
@@ -76,46 +83,43 @@ export default function QRScannerComponent() {
 
     return (
         <div className={styles.container}>
-            <h1>Scanner de Code QR</h1>
+            <h1 className="text-xl font-bold mb-4">Scanner de Code QR</h1>
 
-            <div className={styles.videoContainer}>
-                {isLoading && <div className={styles.loading}>Initialisation du scanner...</div>}
+            <div className={styles.videoContainer} style={{ position: 'relative', width: '100%', maxWidth: '500px' }}>
+                {isLoading && <div className={styles.loading}>Initialisation...</div>}
+
                 <video
                     ref={videoRef}
                     className={styles.video}
-                    style={{ display: isLoading ? 'none' : 'block' }}
+                    playsInline  // Indispensable pour iOS
+                    muted        // Aide au démarrage automatique
+                    style={{
+                        width: '100%',
+                        height: 'auto',
+                        display: 'block' // Assure-toi qu'il n'est pas en display: none
+                    }}
                 />
-                <div className={styles.scannerOverlay} />
             </div>
 
-            {error && <div className={styles.error}>{error}</div>}
+            {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
 
             {scannedData && (
-                <div className={styles.resultBox}>
-                    <h2>Code QR scanné ✓</h2>
-                    <p className={styles.resultData}>{scannedData}</p>
+                <div className={styles.resultBox} style={{ marginTop: '20px', padding: '15px', border: '1px solid #ccc' }}>
+                    <h2 className="font-bold">Résultat :</h2>
+                    <p className={styles.resultData} style={{ wordBreak: 'break-all' }}>{scannedData}</p>
                     <button onClick={handleReset} className={styles.resetButton}>
-                        Scanner un autre code
+                        Réinitialiser
                     </button>
                 </div>
             )}
 
-            <div className={styles.controls}>
+            <div className={styles.controls} style={{ marginTop: '20px' }}>
                 <button
                     onClick={handleToggleScan}
-                    className={`${styles.button} ${isScanning ? styles.buttonActive : ''}`}
+                    className={styles.button}
                 >
                     {isScanning ? '⏸ Pause' : '▶ Reprendre'}
                 </button>
-            </div>
-
-            <div className={styles.info}>
-                <h3>Instructions:</h3>
-                <ul>
-                    <li>Placez le code QR devant votre caméra</li>
-                    <li>Assurez-vous d'avoir une bonne luminosité</li>
-                    <li>Le scanner détectera automatiquement le code</li>
-                </ul>
             </div>
         </div>
     );
